@@ -217,8 +217,7 @@ pub(super) const RADV: Driver = Driver {
     )],
     options: &["-Damd-use-llvm=false"],
     host_tools: true,
-    // AMD's stack gives no Vulkan driver yet.
-    released: false,
+    released: true,
     model: "radv_query.c",
     stand_ins: &["radv_nir_options", "radv_submit"],
     libraries: &[&LIBDRM_AMDGPU],

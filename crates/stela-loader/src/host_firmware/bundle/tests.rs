@@ -23,9 +23,9 @@ fn the_complete_bundle_holds_every_recipe_once_by_content() {
     // do, and, with the AMD port, amdgpu's `mec` and `mec2` of Raphael and
     // of Navi 21.
     if Ports::BUILT == Ports::ALL {
-        assert_eq!(count + 4, recipes().count());
-        // The recipes' recorded lengths: 121 files, 184.9 MiB.
-        assert_eq!((count, bytes), (121, 193_887_456), "{count} {bytes}");
+        assert_eq!(count + 15, recipes().count());
+        // The recipes' recorded lengths: 205 files, 199.7 MiB.
+        assert_eq!((count, bytes), (205, 209_432_058), "{count} {bytes}");
     }
     if Ports::BUILT == Ports::NONE {
         assert_eq!(count + 2, recipes().count());
@@ -168,12 +168,12 @@ fn a_boot_selects_exactly_the_files_its_pci_functions_need() {
     assert_eq!(members(&ax210), expected);
     // With the AMD port: Ryzen 9000 graphics, the files amdgpu asks for on it, its HDMI audio
     // function needs none, and an AMD display chip without pinned files
-    // (Navi 10) is named once.
+    // (Vega 10) is named once.
     let ryzen = select_for(
         &[
             pci(0x1002, 0x13c0, 0x03),
             pci(0x1002, 0x1640, 0x04),
-            pci(0x1002, 0x731f, 0x03),
+            pci(0x1002, 0x687f, 0x03),
         ],
         Ports::ALL,
     );
@@ -204,7 +204,21 @@ fn a_boot_selects_exactly_the_files_its_pci_functions_need() {
     let found = members(&ryzen);
     assert!(found.iter().all(|member| expected.contains(member)));
     assert_eq!(found.len(), USB.len() + raphael.len() - 1);
-    assert_eq!(ryzen.unknown, ["pci 1002:731f"]);
+    assert_eq!(ryzen.unknown, ["pci 1002:687f"]);
+    // A Radeon RX 570 (Polaris 10, 1002:67df): its files, `mec2` held once as `mec`'s bytes.
+    let polaris10 = select_for(
+        &[pci(0x1002, 0x67df, 0x03), pci(0x1002, 0xaaf0, 0x04)],
+        Ports::ALL,
+    );
+    let found = members(&polaris10);
+    let files = family(0x67df);
+    assert!(
+        found
+            .iter()
+            .all(|member| USB.contains(member) || files.contains(member))
+    );
+    assert_eq!(found.len(), USB.len() + files.len() - 1);
+    assert!(polaris10.unknown.is_empty());
     // An RX 9070 (Navi 48) and its audio function: amdgpu's files for Navi
     // 48 and nothing for the audio function.
     let navi48 = select_for(
@@ -409,11 +423,12 @@ fn the_boot_images_drivers_and_the_bundle_name_the_same_gpu_ports() {
     let loader = include_str!("../../../Cargo.toml");
     let cli = include_str!("../../../../stela-cli/Cargo.toml");
     // The default image's drivers, the boot's bundle and a default stick's:
-    // no AMD port in any.
+    // AMD port enabled across all.
     let drivers = ports_of(line(boot, "stela-drivers = "));
-    assert_eq!(drivers, Ports::NONE);
+    assert_eq!(drivers, Ports::ALL);
     assert_eq!(ports_of(line(boot, "stela-loader = ")), drivers);
     assert_eq!(ports_of(line(loader, "default = ")), drivers);
+    assert_eq!(ports_of(line(cli, "default = ")), drivers);
     // An image with amdgpu reads its firmware, and `stela` built with the
     // port writes it.
     let amdgpu = line(boot, "amdgpu = ");

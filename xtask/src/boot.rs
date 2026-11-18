@@ -523,7 +523,8 @@ pub fn run(command: Command) -> Result<ExitCode> {
 
 pub fn build(release: bool) -> Result<PathBuf> {
     crate::gpu::build_nvk(crate::gpu::default_jobs())?;
-    build_with_diagnostics(release, false, Gpu::Nvk)
+    crate::gpu::require_vulkan_driver("amd")?;
+    build_with_diagnostics(release, false, Gpu::Radv)
 }
 
 /// The GPU drivers a `stela.efi` carries beyond its Linux environment.

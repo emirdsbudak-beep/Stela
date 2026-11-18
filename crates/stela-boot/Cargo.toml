@@ -28,7 +28,7 @@ test = false
 [workspace]
 
 [features]
-default = []
+default = ["radv"]
 diagnostics = ["stela-drivers/irq-diagnostics"]
 native-profile = ["stela-soc/native-profile", "stela-engine/native-profile"]
 # NVK, NIR and NAK in the image, from `cargo xtask gpu nvk`.
@@ -49,11 +49,11 @@ stela-tls = { path = "../stela-tls" }
 stela-formats = { path = "../stela-formats", default-features = false }
 uefi = { version = "0.41", default-features = false, features = ["alloc"] }
 stela-boot-core = { path = "../stela-boot-core", features = ["native-acpi"] }
-stela-drivers = { path = "../stela-drivers", features = ["native-acpi", "nouveau-port"] }
+stela-drivers = { path = "../stela-drivers", features = ["native-acpi", "nouveau-port", "amdgpu-port"] }
 stela-soc = { path = "../stela-soc", default-features = false }
 stela-mesa = { path = "../stela-mesa", optional = true }
 stela-runtime = { path = "../stela-runtime", default-features = false }
-stela-loader = { path = "../stela-loader", default-features = false }
+stela-loader = { path = "../stela-loader", default-features = false, features = ["amdgpu-port"] }
 stela-compiler = { path = "../stela-compiler", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 

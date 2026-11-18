@@ -8,7 +8,9 @@ name: release
 
 on:
   push:
+    branches: [feat/amd-polaris-and-rdna-support]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -47,7 +49,7 @@ jobs:
             echo "::error::Cargo.toml has no [workspace.package] version"
             exit 1
           fi
-          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" && "$GITHUB_REF_NAME" != "v$version-"* ]]; then
             echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version (expected v$version)"
             exit 1
           fi
@@ -221,7 +223,7 @@ jobs:
         env:
           STELA_RELEASE: "1"
         run: |
-          cargo xtask boot build --release
+          cargo xtask boot build --release --radv
           echo "Vulkan drivers: $(paste -sd, target/gpu/nvk/vulkan-drivers)" >> "$GITHUB_STEP_SUMMARY"
           efi=target/boot/x86_64-unknown-uefi/release/stela-deploy.efi
           [[ "$(head -c 2 "$efi")" == MZ ]] || { echo "::error::$efi is not a PE image"; exit 1; }
@@ -392,13 +394,21 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME exists: replacing its files, keeping its text"
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="$GITHUB_REF_NAME"
+            tag_flag="--verify-tag"
           else
-            gh release create "$GITHUB_REF_NAME" dist/* \
-              --verify-tag \
-              --title "Stela $GITHUB_REF_NAME" \
+            tag="v$VERSION-amd"
+            tag_flag="--target=$GITHUB_SHA"
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag exists: replacing its files, keeping its text"
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* \
+              "$tag_flag" \
+              --title "Stela $tag" \
               --notes-file notes.txt
           fi
