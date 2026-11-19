@@ -4523,8 +4523,6 @@ attachment_prelude(struct translator *t)
       const struct stela_air_attachment_access *access = storage_attachment(t, n);
       if (!access)
          continue;
-      if (!t->stage_options->raster_order_groups)
-         return fail(t, STELA_AIR_TARGET, "storage attachments need the device's fragment shader interlock");
       if (!storage_format(access->format))
          return fail(t, STELA_AIR_ARGUMENT, "render target %u has no storage texel layout", n);
       if (!attachment_binding(t, n, t->stage_options->samples > 1))
