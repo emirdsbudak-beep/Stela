@@ -165,11 +165,17 @@ int atexit(void (*function)(void))
 /* RADV runs with color compression (DCC) off: under the unified image
  * layouts Stela's Metal device requires, an image a copy fills and a shader
  * then samples read back blank with DCC on (app icons and widgets drew
- * empty on an RX 6800 XT). */
+ * empty on an RX 6800 XT).
+ *
+ * On Polaris (GFX8), RADV supports shaderFloat16 in hardware (single-rate)
+ * but leaves it off by default behind `radv_enable_float16_gfx8`; Stela's
+ * Metal layer requires `shaderFloat16`, so enable it for GFX8 GPUs. */
 char *getenv(const char *name)
 {
 	if (name && !strcmp(name, "RADV_DEBUG"))
 		return (char *)"nodcc";
+	if (name && !strcmp(name, "radv_enable_float16_gfx8"))
+		return (char *)"true";
 	return NULL;
 }
 
