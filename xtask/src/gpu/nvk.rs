@@ -215,7 +215,10 @@ pub(super) const RADV: Driver = Driver {
         "metro_exodus_GetSemaphoreCounterValue",
         "radv_metro_exodus_GetSemaphoreCounterValue",
     )],
-    options: &["-Damd-use-llvm=false"],
+    options: &[
+        "-Damd-use-llvm=false",
+        "-Dradv-build-id=5374656c6120737461746963616c6c7900000000",
+    ],
     host_tools: true,
     released: true,
     model: "radv_query.c",
