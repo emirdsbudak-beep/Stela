@@ -1334,7 +1334,11 @@ impl Derivation<'_> {
                 )
                 .with(
                     C::LINEAR,
-                    features.image_drm_format_modifier && support.linear.contains(F::SAMPLED_IMAGE),
+                    if features.image_drm_format_modifier {
+                        support.linear.contains(F::SAMPLED_IMAGE)
+                    } else {
+                        optimal.contains(F::SAMPLED_IMAGE | F::TRANSFER_SRC | F::TRANSFER_DST)
+                    },
                 );
         }
         capabilities

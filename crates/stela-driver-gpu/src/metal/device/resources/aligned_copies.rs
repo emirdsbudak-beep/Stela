@@ -168,7 +168,12 @@ impl<B: Backend, C: Compiler> Device<B, C> {
         let place = memory_offset
             .checked_add(layout.offset)
             .ok_or(Error::Invalid("the rows lie past the memory"))?;
-        let fits = resource::linear_layout_fits(&self.capabilities, place, layout.bytes_per_row);
+        let fits = self
+            .backend
+            .physical_device()
+            .features
+            .image_drm_format_modifier
+            && resource::linear_layout_fits(&self.capabilities, place, layout.bytes_per_row);
         if fits && !sampled {
             let image = self
                 .backend
