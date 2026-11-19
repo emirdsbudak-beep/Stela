@@ -766,12 +766,13 @@ impl Derivation<'_> {
             features.fragment_shader_pixel_interlock,
             ShaderFeatures::RASTER_ORDER_GROUPS,
         ));
-        let framebuffer_reads = raster_order_groups
-            && self.check(api(
-                "framebuffer reads",
-                features.dynamic_rendering_local_read && features.shader_storage_image_multisample,
-                ApiFeatures::EMPTY,
-            ));
+        let framebuffer_reads = self.check(api(
+            "framebuffer reads",
+            features.dynamic_rendering_local_read
+                && features.shader_storage_image_multisample
+                && self.shaders.contains(ShaderFeatures::RASTER_ORDER_GROUPS),
+            ApiFeatures::EMPTY,
+        ));
         // A stencil output without stencil export, or storage attachments
         // whose pipeline cannot test fragments first: the function tests
         // fragments on storage copies of the attachments, which image copies
@@ -1122,8 +1123,7 @@ impl Derivation<'_> {
     /// interlock section: framebuffer reads' requirements, unrecorded.
     fn storage_attachments(&self) -> bool {
         let features = &self.device.features;
-        features.fragment_shader_pixel_interlock
-            && features.dynamic_rendering_local_read
+        features.dynamic_rendering_local_read
             && features.shader_storage_image_multisample
             && self.shaders.contains(ShaderFeatures::RASTER_ORDER_GROUPS)
     }
@@ -1368,13 +1368,17 @@ impl Derivation<'_> {
         };
         let (first, second) = (plane(first), plane(second));
         let both = |flag| first.contains(flag) && second.contains(flag);
-        // The planes are linear-modifier images (`resource::linear_texture`).
+        // The planes are linear-modifier images (`resource::linear_texture`),
+        // or optimal aligned copies on GPUs without `image_drm_format_modifier`.
         let linear = |format: V, features: F| {
-            self.device
-                .formats
-                .get(format)
-                .modifier_linear
-                .contains(features)
+            let support = self.device.formats.get(format);
+            if self.device.features.image_drm_format_modifier {
+                support.modifier_linear.contains(features)
+            } else {
+                support
+                    .optimal
+                    .contains(features | F::TRANSFER_SRC | F::TRANSFER_DST)
+            }
         };
         // Shaders convert raw texels of byte components only.
         let render = format.planes() == Some(Planes::Full)

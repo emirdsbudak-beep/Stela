@@ -4274,7 +4274,7 @@ order_fragments(struct translator *t)
    bool storage = t->storage_attachments != 0, imageblock = t->fragment_imageblock;
    if (!storage && !imageblock && !t->render.entry.raster_ordered)
       return true;
-   if (!t->stage_options->raster_order_groups)
+   if (!t->stage_options->raster_order_groups && !storage)
       return fail(t, STELA_AIR_TARGET, "raster order groups need the device's fragment shader interlock");
    if (storage && !attachment_outputs(t))
       return false;
@@ -4340,7 +4340,8 @@ order_fragments(struct translator *t)
    nir_variable_mode modes = nir_var_mem_global | nir_var_mem_ssbo | nir_var_image;
    nir_builder *b = &t->b;
    b->cursor = begin;
-   nir_begin_invocation_interlock(b);
+   if (t->stage_options->raster_order_groups)
+      nir_begin_invocation_interlock(b);
    nir_scoped_memory_barrier(b, SCOPE_DEVICE, NIR_MEMORY_ACQUIRE, modes);
    nir_def *bits[AIR_MAX_RENDER_TARGETS] = {0}, *texels[AIR_MAX_RENDER_TARGETS] = {0};
    u_foreach_bit(n, t->storage_attachments) {
@@ -4379,8 +4380,10 @@ order_fragments(struct translator *t)
    if (tests)
       nir_pop_if(b, NULL);
    nir_scoped_memory_barrier(b, SCOPE_DEVICE, NIR_MEMORY_RELEASE, modes);
-   nir_end_invocation_interlock(b);
-   t->b.shader->info.fs.pixel_interlock_ordered = true;
+   if (t->stage_options->raster_order_groups) {
+      nir_end_invocation_interlock(b);
+      t->b.shader->info.fs.pixel_interlock_ordered = true;
+   }
    if (tests && !fragment_tests_end(t, nir_iand(b, passed, kept)))
       return false;
    nir_progress(true, impl, nir_metadata_none);
