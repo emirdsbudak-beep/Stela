@@ -8,7 +8,6 @@ name: release
 
 on:
   push:
-    branches: [feat/amd-polaris-and-rdna-support]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -160,7 +159,9 @@ jobs:
         id: nvk
         with:
           path: target/gpu
-          key: nvk-${{ steps.keys.outputs.nvk }}-${{ hashFiles('xtask/src/gpu/**', 'crates/stela-driver-gpu/**', 'third_party/patches/**', 'third_party/*.sparse', '.github/spirv.sh') }}
+          key: nvk-${{ steps.keys.outputs.nvk }}-${{ hashFiles('xtask/src/gpu/**', 'third_party/patches/**', 'third_party/*.sparse', '.github/spirv.sh') }}
+          restore-keys: |
+            nvk-${{ steps.keys.outputs.nvk }}-
 
       - uses: actions/download-artifact@v4
         with:
