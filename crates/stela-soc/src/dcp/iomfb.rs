@@ -1522,7 +1522,7 @@ impl Methods {
         result?;
         self.presented(batch);
         if let Some(samples) = samples
-            && matches!(self.presented, 10 | 30 | 100)
+            && matches!(self.presented, 10 | 300 | 600 | 1000)
         {
             self.record_log(Log::Pixels {
                 total: self.presented,

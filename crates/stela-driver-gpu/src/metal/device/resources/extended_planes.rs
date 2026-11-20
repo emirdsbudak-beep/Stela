@@ -700,14 +700,18 @@ impl<B: Backend, C: Compiler> Device<B, C> {
             // once the pass decodes them all: its encode then writes only
             // the texels whose codes changed. Otherwise it writes all it
             // encodes, and the mirror with them.
-            mirror: match surface {
-                Some(_) if current || loads => TexelArguments::MIRROR_COMPARE,
-                Some(_) => TexelArguments::MIRROR_WRITE,
-                None => 0,
+            mirror: if !self.capabilities.raster_order_groups {
+                0
+            } else {
+                match surface {
+                    Some(_) if current || loads => TexelArguments::MIRROR_COMPARE,
+                    Some(_) => TexelArguments::MIRROR_WRITE,
+                    None => 0,
+                }
             },
             // A pass that loads keeps the planes where it does not draw:
             // its fragments mark the tiles they reach.
-            stamp: if surface.is_some() && loads {
+            stamp: if self.capabilities.raster_order_groups && surface.is_some() && loads {
                 next_stamp()
             } else {
                 0

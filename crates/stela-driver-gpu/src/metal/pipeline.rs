@@ -731,7 +731,10 @@ fn blended_extended_range(
     fragment: &Interface,
     targets: &RenderTargets,
 ) -> u32 {
-    if !capabilities.framebuffer_reads || !tests_first(fragment, targets) {
+    if !capabilities.raster_order_groups
+        || !capabilities.framebuffer_reads
+        || !tests_first(fragment, targets)
+    {
         return 0;
     }
     targets
