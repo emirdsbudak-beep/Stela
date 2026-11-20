@@ -63,6 +63,7 @@ jobs:
 
   app:
     needs: version
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -85,7 +86,7 @@ jobs:
           retention-days: 7
 
   efi:
-    needs: [version, app]
+    needs: [version]
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     env:
@@ -164,59 +165,15 @@ jobs:
           restore-keys: |
             nvk-${{ steps.keys.outputs.nvk }}-
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: stela-app
-          path: app
-
-      - name: Unpack Stela.app
-        run: |
-          tar -C app -xf app/Stela.app.tar
-          echo "STELA_APP=$PWD/app/Stela.app" >> "$GITHUB_ENV"
-
       - name: Fetch upstream sources
         run: cargo xtask gpu fetch
-
-      # The complete corresponding source: the tracked tree (with
-      # third_party/patches) and each submodule's files at its pin, limited
-      # to the sparse paths `gpu fetch` checks out. GitHub's tag archives
-      # leave submodules out.
-      - name: Source archive
-        run: |
-          export LC_ALL=C
-          stage="$RUNNER_TEMP/source"
-          rm -rf "$stage" && mkdir -p "$stage"
-          git archive --format=tar --prefix="$SOURCE/" HEAD | tar -x -C "$stage"
-          index="$RUNNER_TEMP/source.index"
-          git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | while read -r _ path; do
-            pin="$(git ls-files --stage -- "$path" | cut -d' ' -f2)"
-            # Tracked files outside the sparse set are marked S (skip-worktree).
-            git -C "$path" -c core.quotePath=false ls-files -v | sed -n 's/^[^S] //p' | sort > "$RUNNER_TEMP/sparse"
-            git -C "$path" -c core.quotePath=false ls-tree -r --name-only "$pin" | sort > "$RUNNER_TEMP/pinned"
-            comm -12 "$RUNNER_TEMP/sparse" "$RUNNER_TEMP/pinned" > "$RUNNER_TEMP/files"
-            rm -f "$index"
-            GIT_INDEX_FILE="$index" git -C "$path" read-tree "$pin"
-            GIT_INDEX_FILE="$index" git -C "$path" checkout-index --prefix="$stage/$SOURCE/$path/" --stdin < "$RUNNER_TEMP/files"
-            echo "$path $pin: $(wc -l < "$RUNNER_TEMP/files") files"
-          done
-          mkdir -p dist
-          tar -C "$stage" -cf - "$SOURCE" | zstd -q -T0 -15 -o "dist/$SOURCE.tar.zst"
-          rm -rf "$stage" "$index"
-          ls -l "dist/$SOURCE.tar.zst"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.SOURCE }}
-          path: dist/${{ env.SOURCE }}.tar.zst
-          if-no-files-found: error
-          compression-level: 0
 
       - name: Keep the restored Mesa and LLVM build current
         if: steps.nvk.outputs.cache-hit == 'true'
         run: |
           # A fresh checkout is newer than the restored objects; the key
-          # proved the sources the same, so date them before the objects.
-          find third_party crates/stela-driver-gpu -path '*/.git' -prune -o -type f -print0 \
+          # proved third_party sources the same, so date them before the objects.
+          find third_party -path '*/.git' -prune -o -type f -print0 \
             | xargs -0 touch -h -d '2000-01-01T00:00:00Z'
 
       # A release fails where a local build would leave out a Vulkan driver
@@ -355,6 +312,7 @@ jobs:
 
   release:
     needs: [version, cli]
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
