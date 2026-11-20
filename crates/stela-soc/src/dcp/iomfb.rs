@@ -1504,6 +1504,7 @@ impl Methods {
             composed,
             result,
             missed,
+            samples,
         }) = finished
         else {
             return Ok(false);
@@ -1520,6 +1521,14 @@ impl Methods {
         }
         result?;
         self.presented(batch);
+        if let Some(samples) = samples
+            && matches!(self.presented, 10 | 30 | 100)
+        {
+            self.record_log(Log::Pixels {
+                total: self.presented,
+                samples,
+            });
+        }
         Ok(true)
     }
 

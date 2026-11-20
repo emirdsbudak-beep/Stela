@@ -143,6 +143,7 @@ pub(crate) struct Composition {
     pub composed: Composed,
     pub result: Result<()>,
     pub missed: bool,
+    pub samples: Option<[u32; 4]>,
 }
 
 /// A present's compose, run outside the devices' lock ([`Self::run`]).
@@ -196,11 +197,33 @@ impl Compose {
             }
         };
         let result = scanout::present(sink.as_mut(), &layers, damage, read, &mut composed);
+        let samples = layers.first().and_then(|layer| {
+            let s = layer.surface;
+            if s.width == 0 || s.height == 0 {
+                return None;
+            }
+            let coords = [
+                (0u64, 0u64),
+                (u64::from(s.width) / 2, u64::from(s.height) / 2),
+                (u64::from(s.width) / 2, u64::from(s.height) / 4),
+                (u64::from(s.width) / 4, u64::from(s.height) / 2),
+            ];
+            let mut out = [0u32; 4];
+            for (slot, (x, y)) in out.iter_mut().zip(coords) {
+                let iova = s.iova.checked_add(y.checked_mul(u64::from(s.stride))?.checked_add(x * 4)?)?;
+                let mut raw = [0u8; 4];
+                if let Ok(true) = pages.read(memory, iova, &mut raw) {
+                    *slot = u32::from_le_bytes(raw);
+                }
+            }
+            Some(out)
+        });
         done.put(Composition {
             sink,
             composed,
             result,
             missed,
+            samples,
         });
     }
 }

@@ -130,6 +130,8 @@ pub enum Log {
     },
     /// Cumulative presentation progress in the bounded log.
     PresentSummary { total: u64, last_swap: u32 },
+    /// Sample raw 32-bit pixels from layer 0 at selected presents for diagnosis.
+    Pixels { total: u64, samples: [u32; 4] },
     /// How swaps reached the scanout over a window of the counter.
     Pacing(Box<iomfb::Pacing>),
     /// A named refusal, with the call's interface row.
@@ -270,6 +272,13 @@ impl core::fmt::Display for Log {
             ),
             Log::PresentSummary { total, last_swap } => {
                 write!(f, "DCP present summary total={total} last_swap={last_swap}")
+            }
+            Log::Pixels { total, samples } => {
+                write!(
+                    f,
+                    "DCP PIXELS total={total} layer0=[{:#010x}, {:#010x}, {:#010x}, {:#010x}]",
+                    samples[0], samples[1], samples[2], samples[3]
+                )
             }
             Log::Pacing(pacing) => write!(f, "{pacing}"),
             Log::Refused(text) => write!(f, "DCP refused {text}"),
