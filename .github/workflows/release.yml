@@ -186,6 +186,7 @@ jobs:
           echo "Vulkan drivers: $(paste -sd, target/gpu/nvk/vulkan-drivers)" >> "$GITHUB_STEP_SUMMARY"
           efi=target/boot/x86_64-unknown-uefi/release/stela-deploy.efi
           [[ "$(head -c 2 "$efi")" == MZ ]] || { echo "::error::$efi is not a PE image"; exit 1; }
+          mkdir -p dist
           cp "$efi" dist/stela.efi
           ls -l dist/stela.efi
           { echo "stela.efi: $(stat -c %s dist/stela.efi) bytes"; echo "sha256 $(sha256sum dist/stela.efi | cut -d' ' -f1)"; } >> "$GITHUB_STEP_SUMMARY"
