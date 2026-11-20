@@ -8,7 +8,7 @@ name: release
 
 on:
   push:
-    branches: ["main"]
+    branches: ["feat/amd-polaris-and-rdna-support"]
     tags: ["v*"]
   workflow_dispatch:
 
