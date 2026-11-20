@@ -667,7 +667,6 @@ impl CommandBuffer {
                 let staging = planes
                     .staging
                     .filter(|_| !begins && stamp == 0 && planes.color != 0 && planes.layers == 1)
-                    .filter(|_| planes.refreshes.iter().all(Option::is_none))
                     .filter(|_| {
                         let [width, height] = area.map_or(planes.extent, |[_, _, w, h]| [w, h]);
                         u64::from(width) * u64::from(height) * u64::from(planes.layers)
@@ -730,8 +729,13 @@ impl CommandBuffer {
                 }
             }
             // The encode wrote the planes' rows: a plane the GPU samples
-            // through an aligned copy has it refreshed for later reads.
-            if !begins && ordered && planes.refreshes.iter().any(Option::is_some) {
+            // through an aligned copy has it refreshed for later reads
+            // unless staged_copies already wrote both the aligned copy and rows.
+            if !begins
+                && ordered
+                && staged.len() < areas.len()
+                && planes.refreshes.iter().any(Option::is_some)
+            {
                 self.recorder.access(super::blit::TRANSFER);
                 for refresh in planes.refreshes.iter().flatten() {
                     self.recorder.push(refresh.refresh());
@@ -1383,6 +1387,63 @@ fn staged_copies(
             1,
             staging.planes[1],
         ));
+    }
+    let copy_rows = |copies: &mut Vec<Command>,
+                     refresh: crate::metal::device::resources::RowCopy,
+                     src_base: u64,
+                     src_row: u32,
+                     dst_row: u32,
+                     texel: u32| {
+        let src_stride = u64::from(src_row);
+        let dst_stride = u64::from(dst_row);
+        let row_bytes = u64::from(width) * u64::from(texel);
+        let dst_base = refresh.region.buffer_offset;
+        if x == 0 && width == planes.extent[0] && src_stride == dst_stride {
+            copies.push(Command::CopyBuffer {
+                src: staging.buffer,
+                dst: refresh.buffer,
+                region: crate::metal::vulkan::command::BufferCopy {
+                    src_offset: src_base + u64::from(y) * src_stride,
+                    dst_offset: dst_base + u64::from(y) * dst_stride,
+                    size: u64::from(height) * src_stride,
+                },
+            });
+        } else {
+            let regions: Vec<_> = (0..u64::from(height))
+                .map(|row| crate::metal::vulkan::command::BufferCopy {
+                    src_offset: src_base + (u64::from(y) + row) * src_stride + u64::from(x * texel),
+                    dst_offset: dst_base + (u64::from(y) + row) * dst_stride + u64::from(x * texel),
+                    size: row_bytes,
+                })
+                .collect();
+            copies.push(Command::CopyBufferRegions {
+                src: staging.buffer,
+                dst: refresh.buffer,
+                regions,
+            });
+        }
+    };
+    if let Some(refresh) = planes.refreshes[0] {
+        copy_rows(
+            &mut copies,
+            refresh,
+            0,
+            staging.color_bytes_per_row,
+            planes.color_bytes_per_row,
+            4,
+        );
+    }
+    if planes.alpha != 0
+        && let Some(refresh) = planes.refreshes[1]
+    {
+        copy_rows(
+            &mut copies,
+            refresh,
+            staging.alpha_offset,
+            staging.alpha_bytes_per_row,
+            planes.alpha_bytes_per_row,
+            1,
+        );
     }
     copies
 }

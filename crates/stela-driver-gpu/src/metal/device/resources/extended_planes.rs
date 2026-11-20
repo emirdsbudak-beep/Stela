@@ -483,9 +483,7 @@ impl<B: Backend, C: Compiler> Device<B, C> {
             return Ok(None);
         };
         let texels = u64::from(extent[0]) * u64::from(extent[1]);
-        if texels < u64::from(PlaneStaging::MIN_TEXELS)
-            || self.plane_refreshes(id).iter().any(Option::is_some)
-        {
+        if texels < u64::from(PlaneStaging::MIN_TEXELS) {
             return Ok(None);
         }
         let (color_bytes_per_row, alpha_offset, alpha_bytes_per_row, size) =

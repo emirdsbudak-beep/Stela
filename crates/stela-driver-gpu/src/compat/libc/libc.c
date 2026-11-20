@@ -162,10 +162,10 @@ int atexit(void (*function)(void))
 	return 0;
 }
 
-/* RADV runs with color/depth compression and fast clears off: under the
- * unified GENERAL image layout Stela's Metal device uses without layout
- * transitions, DCC on GFX10.3 (RX 6800 XT) and CMASK/fast-clears/HTILE on
- * GFX8 (Polaris 10) can leave metadata out of sync so images read back blank.
+/* RADV runs with color compression (DCC) off: under the unified image
+ * layouts Stela's Metal device requires, an image a copy fills and a shader
+ * then samples read back blank with DCC on (app icons and widgets drew
+ * empty on an RX 6800 XT).
  *
  * On Polaris (GFX8), RADV supports shaderFloat16 in hardware (single-rate)
  * but leaves it off by default behind `radv_enable_float16_gfx8`; Stela's
@@ -173,7 +173,7 @@ int atexit(void (*function)(void))
 char *getenv(const char *name)
 {
 	if (name && !strcmp(name, "RADV_DEBUG"))
-		return (char *)"nodcc,nofastclears,nohiz,notccompatcmask";
+		return (char *)"nodcc";
 	if (name && !strcmp(name, "radv_enable_float16_gfx8"))
 		return (char *)"true";
 	return NULL;
