@@ -234,6 +234,215 @@ pub fn first_submission<B: Backend>(backend: &mut B) -> Result<bool, Error> {
     signaled
 }
 
+/// 1-millisecond boot diagnostic on the real GPU: clears a 4x4 `R16G16B16A16Sfloat`
+/// working image to `(1.0, 0.5, 0.25, 1.0)`, reads it via `CopyImageToBuffer`,
+/// encodes it via `LoadTexels` (XR10), then decodes `0x37e9fdff` via `StoreTexels`
+/// and reads back via `CopyImageToBuffer`.
+#[cfg(feature = "metal-vulkan")]
+fn polaris_self_test<B: Backend>(backend: &mut B) -> Result<String, Error> {
+    use crate::metal::{
+        binding::{NULL_DESCRIPTOR, ResourceId, TexelArguments},
+        hazard::FULL,
+        pass::ClearValue,
+        pixel_format::PixelFormat,
+        vulkan::{
+            AttachmentLoadOp, AttachmentStoreOp, BufferCreate, BufferUsage, ComponentSwizzle,
+            Format, ImageAspects, ImageCreate, ImageTiling, ImageType, ImageUsage, ImageViewType,
+            SampleCounts,
+            backend::Descriptor,
+            command::{Attachment, BufferImageCopy, Command, Rendering, Subresource},
+            object::{BufferInfo, ImageInfo, ImageViewInfo, MemoryRequest, SubresourceRange},
+        },
+    };
+    let img_info = ImageInfo {
+        flags: ImageCreate::MUTABLE_FORMAT | ImageCreate::EXTENDED_USAGE,
+        image_type: ImageType::D2,
+        format: Format::R16G16B16A16Sfloat,
+        extent: [4, 4, 1],
+        mip_levels: 1,
+        array_layers: 1,
+        samples: SampleCounts::C1,
+        tiling: ImageTiling::Optimal,
+        usage: ImageUsage::STORAGE | ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_SRC,
+        view_formats: alloc::vec![Format::R16G16B16A16Sfloat, Format::R32G32Uint],
+        linear: None,
+    };
+    let (image, img_mem, _) = backend.create_image(
+        &img_info,
+        MemoryRequest {
+            required: MemoryProperties::DEVICE_LOCAL,
+            preferred: MemoryProperties::EMPTY,
+            mapped: false,
+        },
+    )?;
+    let range = SubresourceRange {
+        aspects: ImageAspects::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
+    };
+    let color_view = backend.create_image_view(
+        image,
+        &ImageViewInfo {
+            view_type: ImageViewType::D2,
+            format: Format::R16G16B16A16Sfloat,
+            components: [ComponentSwizzle::Identity; 4],
+            range,
+            usage: ImageUsage::COLOR_ATTACHMENT,
+            min_lod: 0.0,
+        },
+    )?;
+    let storage_view = backend.create_image_view(
+        image,
+        &ImageViewInfo {
+            view_type: ImageViewType::D2Array,
+            format: Format::R32G32Uint,
+            components: [ComponentSwizzle::Identity; 4],
+            range,
+            usage: ImageUsage::STORAGE,
+            min_lod: 0.0,
+        },
+    )?;
+    let storage_slot: u32 = 1;
+    backend.write_descriptor(storage_slot, Descriptor::StorageImage(storage_view));
+    let storage_id = ResourceId::texture(NULL_DESCRIPTOR, storage_slot, 1).0;
+
+    let buf = backend.create_buffer(
+        &BufferInfo {
+            size: 2048,
+            usage: BufferUsage::SHADER_DEVICE_ADDRESS
+                | BufferUsage::STORAGE_BUFFER
+                | BufferUsage::TRANSFER_SRC
+                | BufferUsage::TRANSFER_DST,
+            flags: BufferCreate::EMPTY,
+        },
+        MemoryRequest {
+            required: MemoryProperties::HOST_VISIBLE | MemoryProperties::HOST_COHERENT,
+            preferred: MemoryProperties::EMPTY,
+            mapped: true,
+        },
+    )?;
+
+    let encoding = PixelFormat::Rgb10A8_2pXr10.describe().encoding().texel_kernel();
+    let load_args = TexelArguments {
+        buffer: buf.address + 256,
+        count: 16,
+        encoding,
+        image: storage_id,
+        width: 4,
+        height: 4,
+        bytes_per_row: 16,
+        alpha: buf.address + 512,
+        alpha_bytes_per_row: 4,
+        ..TexelArguments::default()
+    };
+    let store_args = TexelArguments {
+        buffer: buf.address + 1024,
+        count: 16,
+        encoding,
+        image: storage_id,
+        width: 4,
+        height: 4,
+        bytes_per_row: 16,
+        alpha: buf.address + 1152,
+        alpha_bytes_per_row: 4,
+        ..TexelArguments::default()
+    };
+    let mut init = alloc::vec![0u8; 2048];
+    init[768..768 + TexelArguments::BYTES as usize].copy_from_slice(&load_args.encode());
+    for i in 0..16 {
+        // Test color: R=0.25 (511), G=0.5 (639), B=1.0 (894) -> (511<<20)|(639<<10)|894 = 0x1ff9ff7e
+        init[1024 + i * 4..1028 + i * 4].copy_from_slice(&0x1ff9_ff7eu32.to_le_bytes());
+        init[1152 + i] = 0x80;
+    }
+    init[1280..1280 + TexelArguments::BYTES as usize].copy_from_slice(&store_args.encode());
+    backend.write_memory(buf.memory, 0, &init)?;
+
+    let copy_region = |buffer_offset| BufferImageCopy {
+        buffer_offset,
+        buffer_row_length: 4,
+        buffer_image_height: 0,
+        subresource: Subresource {
+            aspects: ImageAspects::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+        offset: [0; 3],
+        extent: [4, 4, 1],
+    };
+    let sem = backend.create_semaphore(0)?;
+    let segment = Segment {
+        waits: alloc::vec::Vec::new(),
+        binds: alloc::vec::Vec::new(),
+        commands: alloc::vec![
+            Command::BeginRendering(Rendering {
+                extent: [4, 4],
+                layer_count: 1,
+                color: alloc::vec![Some(Attachment {
+                    view: color_view,
+                    resolve: None,
+                    load_op: AttachmentLoadOp::Clear,
+                    store_op: AttachmentStoreOp::Store,
+                    clear: ClearValue::Float([1.0, 0.5, 0.25, 1.0]),
+                })],
+                depth: None,
+                stencil: None,
+                note: 0,
+            }),
+            Command::EndRendering,
+            Command::Barrier(FULL),
+            Command::CopyImageToBuffer {
+                src: image,
+                dst: buf.buffer,
+                region: copy_region(0),
+            },
+            Command::LoadTexels {
+                arguments: buf.address + 768,
+                count: 16,
+            },
+            Command::Barrier(FULL),
+            Command::StoreTexels {
+                arguments: buf.address + 1280,
+                count: 16,
+            },
+            Command::Barrier(FULL),
+            Command::CopyImageToBuffer {
+                src: image,
+                dst: buf.buffer,
+                region: copy_region(1536),
+            },
+            Command::Barrier(FULL),
+        ],
+        signals: alloc::vec![(sem, 1)],
+    };
+    backend.submit(core::slice::from_ref(&segment))?;
+    let ok = backend.wait_semaphore(sem, 1, FIRST_SUBMISSION_NS)?;
+    let mut out = alloc::vec![0u8; 2048];
+    if ok {
+        backend.read_memory(buf.memory, 0, &mut out)?;
+    }
+    let u32_at = |off: usize| u32::from_le_bytes(out[off..off + 4].try_into().unwrap());
+    let report = format!(
+        "SELF-TEST ok={ok} clear_copy=[{:#010x}, {:#010x}] load_texels=(color={:#010x}, alpha={:#04x}) store_copy=[{:#010x}, {:#010x}]",
+        u32_at(0),
+        u32_at(4),
+        u32_at(256),
+        out[512],
+        u32_at(1536),
+        u32_at(1540),
+    );
+    backend.destroy(Object::Semaphore(sem));
+    backend.destroy(Object::ImageView(color_view));
+    backend.destroy(Object::ImageView(storage_view));
+    backend.destroy(Object::Image(image));
+    backend.destroy(Object::Memory(img_mem));
+    backend.destroy(Object::Buffer(buf.buffer));
+    backend.destroy(Object::Memory(buf.memory));
+    Ok(report)
+}
+
 /// The Metal service over a linked Vulkan driver and the AIR compiler.
 #[cfg(feature = "metal-vulkan")]
 pub type NativeService = Service<NativeBackend, AirCompiler>;
@@ -322,6 +531,10 @@ pub unsafe fn open(
         let failed = match first_submission(&mut backend) {
             Ok(true) => {
                 (loader.log)("first submission signaled");
+                match polaris_self_test(&mut backend) {
+                    Ok(report) => (loader.log)(&report),
+                    Err(error) => (loader.log)(&format!("SELF-TEST error: {error:?}")),
+                }
                 None
             }
             Ok(false) => {
