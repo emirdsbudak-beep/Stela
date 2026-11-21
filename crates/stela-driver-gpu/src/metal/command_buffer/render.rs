@@ -663,6 +663,22 @@ impl CommandBuffer {
             // The staged encodes' areas, which copies move into the planes
             // once every encode of the pass wrote its staging memory.
             let mut staged = Vec::new();
+            // A decode of the whole planes reads them through device memory:
+            // the copy engine moves their rows there whole, where the kernel
+            // reading guest RAM over the bus costs ~100 ms a frame.
+            let decode_staging = planes
+                .staging
+                .filter(|_| {
+                    begins
+                        && planes.color != 0
+                        && planes.layers == 1
+                        && planes.refreshes[0].is_some()
+                        && (planes.alpha == 0 || planes.refreshes[1].is_some())
+                        && u64::from(width) * u64::from(height)
+                            >= u64::from(PlaneStaging::MIN_TEXELS)
+                })
+                .filter(|_| areas.len() == 1 && areas[0].is_none());
+            let mut loaded = false;
             for &area in areas {
                 let staging = planes
                     .staging
@@ -672,13 +688,21 @@ impl CommandBuffer {
                         u64::from(width) * u64::from(height) * u64::from(planes.layers)
                             >= u64::from(PlaneStaging::MIN_TEXELS)
                     });
-                let converted = match staging {
-                    Some(staging) => staged_conversion(planes, area, &staging)?,
-                    None => plane_conversion(planes, area, stamp)?,
+                let converted = match (staging, decode_staging) {
+                    (Some(staging), _) => staged_conversion(planes, area, &staging)?,
+                    (None, Some(source)) => staged_decode(planes, &source)?,
+                    (None, None) => plane_conversion(planes, area, stamp)?,
                 };
                 let Some((arguments, count)) = converted else {
                     continue;
                 };
+                if let Some(source) = decode_staging.filter(|_| !loaded) {
+                    loaded = true;
+                    self.recorder.access(super::blit::TRANSFER);
+                    for command in staged_loads(planes, &source) {
+                        self.recorder.push(command);
+                    }
+                }
                 let upload = self.recorder.upload(
                     resolver,
                     &arguments.encode(),
@@ -1350,6 +1374,85 @@ fn staged_conversion(
         },
         count,
     )))
+}
+
+/// The texel kernel's arguments decoding all of `planes` from `staging`,
+/// which [`staged_loads`] filled with their rows, and its threads.
+fn staged_decode(
+    planes: &ExtendedPlanes,
+    staging: &PlaneStaging,
+) -> Result<Option<(TexelArguments, u32)>> {
+    let Some((arguments, count)) = plane_conversion(planes, None, 0)? else {
+        return Ok(None);
+    };
+    Ok(Some((
+        TexelArguments {
+            buffer: staging.address,
+            bytes_per_row: staging.color_bytes_per_row,
+            alpha: if planes.alpha == 0 {
+                0
+            } else {
+                staging.address + staging.alpha_offset
+            },
+            alpha_bytes_per_row: staging.alpha_bytes_per_row,
+            ..arguments
+        },
+        count,
+    )))
+}
+
+/// The copies of all of `planes`' rows, which the GPU would read over the
+/// bus, into `staging`.
+fn staged_loads(planes: &ExtendedPlanes, staging: &PlaneStaging) -> Vec<Command> {
+    let [width, height] = planes.extent;
+    let mut copies = Vec::new();
+    let mut load = |refresh: crate::metal::device::resources::RowCopy,
+                    dst_base: u64,
+                    src_row: u32,
+                    dst_row: u32,
+                    texel: u32| {
+        let (src_stride, dst_stride) = (u64::from(src_row), u64::from(dst_row));
+        let src_base = refresh.region.buffer_offset;
+        if src_stride == dst_stride {
+            copies.push(Command::CopyBuffer {
+                src: refresh.buffer,
+                dst: staging.buffer,
+                region: crate::metal::vulkan::command::BufferCopy {
+                    src_offset: src_base,
+                    dst_offset: dst_base,
+                    size: u64::from(height) * src_stride,
+                },
+            });
+        } else {
+            let regions: Vec<_> = (0..u64::from(height))
+                .map(|row| crate::metal::vulkan::command::BufferCopy {
+                    src_offset: src_base + row * src_stride,
+                    dst_offset: dst_base + row * dst_stride,
+                    size: u64::from(width) * u64::from(texel),
+                })
+                .collect();
+            copies.push(Command::CopyBufferRegions {
+                src: refresh.buffer,
+                dst: staging.buffer,
+                regions,
+            });
+        }
+    };
+    if let Some(refresh) = planes.refreshes[0] {
+        load(refresh, 0, planes.color_bytes_per_row, staging.color_bytes_per_row, 4);
+    }
+    if planes.alpha != 0
+        && let Some(refresh) = planes.refreshes[1]
+    {
+        load(
+            refresh,
+            staging.alpha_offset,
+            planes.alpha_bytes_per_row,
+            staging.alpha_bytes_per_row,
+            1,
+        );
+    }
+    copies
 }
 
 /// The copies of what a staged conversion of `arguments` wrote into

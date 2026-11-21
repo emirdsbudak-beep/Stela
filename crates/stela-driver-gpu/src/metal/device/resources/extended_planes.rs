@@ -503,7 +503,8 @@ impl<B: Backend, C: Compiler> Device<B, C> {
             size,
             usage: BufferUsage::SHADER_DEVICE_ADDRESS
                 | BufferUsage::STORAGE_BUFFER
-                | BufferUsage::TRANSFER_SRC,
+                | BufferUsage::TRANSFER_SRC
+                | BufferUsage::TRANSFER_DST,
             flags: BufferCreate::EMPTY,
         };
         let request = MemoryRequest {
