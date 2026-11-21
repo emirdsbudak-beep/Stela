@@ -884,6 +884,25 @@ impl<B: Backend, C: Compiler> Device<B, C> {
     pub fn commit_on(&mut self, key: u64, queue: u64, mut commands: CommandBuffer) -> Result<u64> {
         let start = self.timing.now();
         self.ensure_admission()?;
+        // Bound in-flight frames so deferred GPU allocations and GTT spill do
+        // not pile up on 4 GiB GPUs and exhaust Stela's 4.3 GiB host heap.
+        if self.queue.in_flight.len() >= 4 {
+            let _ = self.poll();
+            if self.queue.in_flight.len() >= 4
+                && let Some(oldest) = self
+                    .queue
+                    .in_flight
+                    .iter()
+                    .find(|flight| matches!(flight.track, Track::Timeline))
+                    .map(|flight| flight.serial)
+                && self
+                    .backend
+                    .wait_semaphore(self.timeline, oldest, 100_000_000)
+                    .unwrap_or(false)
+            {
+                let _ = self.poll();
+            }
+        }
         let serial = self.submitted + 1;
         let completion = (self.timeline, serial);
         let finished = self
