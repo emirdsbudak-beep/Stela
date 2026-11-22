@@ -157,6 +157,7 @@ impl<B: Backend, C: Compiler> Device<B, C> {
         plan: &TexturePlan,
         rows: Rows,
         sampled: bool,
+        iosurface: bool,
     ) -> Result<(Image, Option<AlignedCopy>)> {
         let Rows {
             buffer,
@@ -181,7 +182,7 @@ impl<B: Backend, C: Compiler> Device<B, C> {
                 .create_placed_image(&plan.image, memory, place)?;
             return Ok((image, None));
         }
-        let refresh = if fits || sampled || !modifiers {
+        let refresh = if fits || sampled || (!modifiers && iosurface) {
             Refresh::Changed {
                 surface: None,
                 filled: None,
@@ -371,20 +372,51 @@ impl<B: Backend, C: Compiler> Device<B, C> {
                 }
             }
         }
-        let dirty: Vec<u32> = surfaces
+        let written_roots: Vec<TextureId> = writes
             .iter()
-            .filter(|note| note.texture.is_none_or(|texture| writes.contains(&texture)))
-            .map(|note| note.surface)
+            .filter_map(|&id| self.aligned_root(id))
             .collect();
+        // Each surface this command buffer may write: `Some(root)` when only
+        // that aligned-copy texture wrote it (its own aligned copy already
+        // holds the new pixels after `tail` or `extended_planes`), or `None`
+        // when a buffer, non-aligned texture, or multiple textures wrote it.
+        let mut dirty: Vec<(u32, Option<TextureId>)> = Vec::new();
+        for note in surfaces {
+            let writer = match note.texture {
+                None => Some(None),
+                Some(texture) => {
+                    let root = self.aligned_root(texture);
+                    if writes.contains(&texture)
+                        || root.is_some_and(|root| written_roots.contains(&root))
+                    {
+                        Some(root)
+                    } else {
+                        None
+                    }
+                }
+            };
+            let Some(writer) = writer else { continue };
+            if let Some((_, existing)) = dirty.iter_mut().find(|(s, _)| *s == note.surface) {
+                if *existing != writer {
+                    *existing = None;
+                }
+            } else {
+                dirty.push((note.surface, writer));
+            }
+        }
         if !dirty.is_empty() {
-            for copy in self.resources.aligned_copies.values_mut().flatten() {
-                if let Refresh::Changed {
-                    surface: Some(surface),
-                    filled,
-                } = &mut copy.refresh
-                    && dirty.contains(surface)
-                {
-                    *filled = None;
+            for (&root, copies) in &mut self.resources.aligned_copies {
+                for copy in copies {
+                    if let Refresh::Changed {
+                        surface: Some(surface),
+                        filled,
+                    } = &mut copy.refresh
+                        && let Some(&(_, sole_writer)) =
+                            dirty.iter().find(|(s, _)| *s == *surface)
+                        && sole_writer.map(|id| id.0) != Some(root)
+                    {
+                        *filled = None;
+                    }
                 }
             }
         }
@@ -440,6 +472,7 @@ impl<B: Backend, C: Compiler> Device<B, C> {
             self.backend.write_memory(memory, offset, &bytes[packed])?;
         }
         // The next command buffer that uses it copies the rows again.
+        let mut surface_id = None;
         for copy in self
             .resources
             .aligned_copies
@@ -447,8 +480,23 @@ impl<B: Backend, C: Compiler> Device<B, C> {
             .into_iter()
             .flatten()
         {
-            if let Refresh::Changed { filled, .. } = &mut copy.refresh {
+            if let Refresh::Changed { surface, filled } = &mut copy.refresh {
                 *filled = None;
+                if let Some(surface) = *surface {
+                    surface_id = Some(surface);
+                }
+            }
+        }
+        if let Some(surface_id) = surface_id {
+            for copy in self.resources.aligned_copies.values_mut().flatten() {
+                if let Refresh::Changed {
+                    surface: Some(surface),
+                    filled,
+                } = &mut copy.refresh
+                    && *surface == surface_id
+                {
+                    *filled = None;
+                }
             }
         }
         Ok(true)

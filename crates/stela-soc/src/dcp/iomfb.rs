@@ -1104,25 +1104,28 @@ impl Methods {
     /// waited [`FENCE_TIMEOUT`] for it. Swaps are shown in order, so a ready
     /// swap waits behind one still drawing.
     fn ready_swaps(&mut self, now: u64) -> usize {
+        let completed = super::gpu::completed();
         let mut ready = 0;
         let mut blocked = false;
         let mut timed_out = Vec::new();
-        // Every fenced swap's wait starts when the display first sees it,
-        // behind a blocked one or not.
+        // Every fenced or GPU-waiting swap's wait starts when the display
+        // first sees it, behind a blocked one or not.
         for frame in &mut self.frames {
-            if frame.fenced != 0 {
+            let waiting = frame.fenced != 0 || completed < frame.gpu_work;
+            if waiting {
                 let since = *frame.waiting_since.get_or_insert(now);
                 if !blocked && now.saturating_sub(since) >= FENCE_TIMEOUT {
                     // Degraded: the surface may still be drawing. Show it
                     // rather than freeze the display, and say so once.
                     timed_out.push((frame.swap_id, frame.fenced));
                     frame.fenced = 0;
+                    frame.gpu_work = 0;
                     if frame.ready_at.is_none() {
                         frame.ready_at = Some(now);
                     }
                 }
             }
-            blocked |= frame.fenced != 0;
+            blocked |= frame.fenced != 0 || completed < frame.gpu_work;
             ready += usize::from(!blocked);
         }
         for (swap_id, fenced) in timed_out {

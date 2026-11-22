@@ -14,7 +14,12 @@ static COMPLETED: AtomicU64 = AtomicU64::new(0);
 /// Note the GPU's last submitted and last completed command buffer serials.
 pub fn note(submitted: u64, completed: u64) {
     SUBMITTED.store(submitted, Ordering::Release);
-    COMPLETED.store(completed, Ordering::Release);
+    COMPLETED.fetch_max(completed, Ordering::Release);
+}
+
+/// Note that the GPU has completed through `completed`.
+pub fn note_completed(completed: u64) {
+    COMPLETED.fetch_max(completed, Ordering::Release);
 }
 
 /// The serial of the last command buffer submitted.

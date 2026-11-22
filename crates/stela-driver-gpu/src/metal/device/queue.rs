@@ -646,13 +646,24 @@ impl<B: Backend, C: Compiler> Device<B, C> {
             };
             let stores = !attached.memoryless
                 && attached.store_op == crate::metal::vulkan::AttachmentStoreOp::Store;
+            let surface = request.color_attachments[index]
+                .as_ref()
+                .and_then(|color| color.surface);
+            if let Some((surface, seed)) = surface {
+                let note = super::SurfaceNote {
+                    texture: Some(attached.view.texture),
+                    surface,
+                    seed,
+                };
+                if !commands.surfaces.contains(&note) {
+                    commands.surfaces.push(note);
+                }
+            }
             let actions = super::resources::PlaneActions {
                 loads: color.load_action == LoadAction::Load,
                 stores,
                 settled: color.store_action == StoreAction::Store,
-                surface: request.color_attachments[index]
-                    .as_ref()
-                    .and_then(|color| color.surface),
+                surface,
             };
             plan.inputs.extended_planes[index] = self.extended_pass_planes(
                 attached.view.texture,

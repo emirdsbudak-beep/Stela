@@ -159,6 +159,13 @@ impl<B: Backend, C: Compiler> Service<B, C> {
                 ],
                 request.surface_format as u32,
             )?
+        } else if request.surface_format != 0 {
+            self.device.new_surface_texture_from_buffer(
+                buffer,
+                &descriptor,
+                request.offset,
+                request.bytes_per_row,
+            )?
         } else {
             self.device.new_texture_from_buffer(
                 buffer,

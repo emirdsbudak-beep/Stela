@@ -1465,6 +1465,7 @@ pub(super) fn awaits_completion(index: usize) -> bool {
 pub(super) fn completed_through(index: usize, timeline: u64, value: u64) {
     if let Some(service) = shared().get(index) {
         service.completed_through(timeline, value);
+        stela_soc::dcp::gpu::note_completed(value);
     }
 }
 

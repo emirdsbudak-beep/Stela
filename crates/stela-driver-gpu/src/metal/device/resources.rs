@@ -952,6 +952,32 @@ impl<B: Backend, C: Compiler> Device<B, C> {
         offset: u64,
         bytes_per_row: u64,
     ) -> Result<TextureId> {
+        self.new_buffer_texture(buffer_id, descriptor, offset, bytes_per_row, false)
+    }
+
+    /// `newTextureWithDescriptor:iosurface:plane:` over an IOSurface's buffer:
+    /// identical to [`Self::new_texture_from_buffer`], except the guest reports
+    /// its IOSurface ID and seed on command buffer commits (`SurfaceUse`), so
+    /// an aligned copy on a device without DRM format modifiers refreshes only
+    /// when used and changed.
+    pub fn new_surface_texture_from_buffer(
+        &mut self,
+        buffer_id: BufferId,
+        descriptor: &TextureDescriptor,
+        offset: u64,
+        bytes_per_row: u64,
+    ) -> Result<TextureId> {
+        self.new_buffer_texture(buffer_id, descriptor, offset, bytes_per_row, true)
+    }
+
+    fn new_buffer_texture(
+        &mut self,
+        buffer_id: BufferId,
+        descriptor: &TextureDescriptor,
+        offset: u64,
+        bytes_per_row: u64,
+        iosurface: bool,
+    ) -> Result<TextureId> {
         let buffer = self.resources.buffers.get(buffer_id.0)?;
         let (vk_buffer, memory, memory_offset, length) = (
             buffer.buffer,
@@ -1019,7 +1045,7 @@ impl<B: Backend, C: Compiler> Device<B, C> {
                 },
                 texel_bytes: u64::from(descriptor.pixel_format.describe().block.bytes),
             };
-            let (image, copy) = self.plane_image(&plan, rows, false)?;
+            let (image, copy) = self.plane_image(&plan, rows, false, iosurface)?;
             let (id, views) = match self.shader_views(image, &plan.views) {
                 Ok(created) => created,
                 Err(error) => {
@@ -1183,7 +1209,7 @@ impl<B: Backend, C: Compiler> Device<B, C> {
                     layout,
                     texel_bytes: u64::from(format.describe().block.bytes),
                 };
-                let (image, copy) = self.plane_image(plan, rows, sampled)?;
+                let (image, copy) = self.plane_image(plan, rows, sampled, true)?;
                 images.push(image);
                 copies.extend(copy);
                 let info = plan
