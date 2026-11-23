@@ -644,9 +644,10 @@ pub fn depth_stencil_copies(device: &PhysicalDevice) -> bool {
 }
 
 /// Whether a fragment function on `device` can run the fragment tests
-/// itself: on storage copies of the attachments in its interlock section.
+/// itself: on storage copies of the attachments, using fragment shader
+/// interlock when the device provides it.
 pub fn fragment_tests(device: &PhysicalDevice) -> bool {
-    device.features.fragment_shader_pixel_interlock && depth_stencil_copies(device)
+    depth_stencil_copies(device)
 }
 
 impl Derivation<'_> {
@@ -777,7 +778,7 @@ impl Derivation<'_> {
         // whose pipeline cannot test fragments first: the function tests
         // fragments on storage copies of the attachments, which image copies
         // between depth or stencil aspects and color images fill.
-        let fragment_tests = raster_order_groups && fragment_tests(self.device);
+        let fragment_tests = fragment_tests(self.device);
         // Vulkan resolves the depth while the stencil, which follows it,
         // resolves from copies of the samples.
         let stencil_follows_depth =

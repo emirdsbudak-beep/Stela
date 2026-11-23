@@ -176,6 +176,15 @@ jobs:
           find third_party -path '*/.git' -prune -o -type f -print0 \
             | xargs -0 touch -h -d '2000-01-01T00:00:00Z'
 
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/boot
+            target/release
+          key: boot-${{ steps.keys.outputs.image }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'crates/stela-boot/Cargo.lock', 'crates/**/Cargo.toml', 'crates/**/*.rs', 'crates/**/*.c', 'crates/**/*.h') }}
+          restore-keys: |
+            boot-${{ steps.keys.outputs.image }}-
+
       # A release fails where a local build would leave out a Vulkan driver
       # the image gives its GPUs (`released` in xtask/src/gpu/nvk.rs).
       - name: Build stela.efi

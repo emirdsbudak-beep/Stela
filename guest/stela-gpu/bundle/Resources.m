@@ -248,7 +248,7 @@ NSUInteger stela_purgeable_state(NSUInteger *slot, NSUInteger state)
 				  bytesPerRow:bytesPerRow
 				 secondOffset:0
 			    secondBytesPerRow:0
-				surfaceFormat:0];
+				surfaceFormat:_surface ? IOSurfaceGetPixelFormat(_surface) : 0];
 }
 
 /* A two-plane format's texture also names its second plane's bytes, and

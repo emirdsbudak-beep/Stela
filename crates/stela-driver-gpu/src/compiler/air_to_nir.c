@@ -3040,10 +3040,9 @@ stage_variable(struct translator *t, const struct stela_air_stage_io *io, bool o
    if (mesh)
       type = glsl_array_type(type, io->per_primitive ? entry->max_primitives : entry->max_vertices, 0);
    if (output && io->semantic == STELA_AIR_STENCIL && !t->stage_options->stencil_export) {
-      if (!t->stage_options->fragment_tests || !t->stage_options->raster_order_groups ||
-          !t->options->bind_depth_stencil) {
+      if (!t->stage_options->fragment_tests || !t->options->bind_depth_stencil) {
          fail(t, STELA_AIR_TARGET,
-              "a stencil output needs the device's shader stencil export or fragment shader interlock");
+              "a stencil output needs the device's shader stencil export or fragment tests");
          return NULL;
       }
       t->tests_fragments = true;
@@ -4226,7 +4225,8 @@ fragment_tests_end(struct translator *t, nir_def *passed)
       return fail(t, STELA_AIR_ALLOCATION, "render IO variable allocation failed");
    mask->data.location = FRAG_RESULT_SAMPLE_MASK;
    nir_store_var(b, mask, passed, 1);
-   b->shader->info.fs.pixel_interlock_ordered = true;
+   if (t->stage_options->raster_order_groups)
+      b->shader->info.fs.pixel_interlock_ordered = true;
    b->shader->info.fs.early_fragment_tests = false;
    return true;
 }
@@ -4247,11 +4247,13 @@ test_fragments(struct translator *t)
    b->cursor = nir_after_block_before_jump(nir_impl_last_block(impl));
    nir_def *kept = fragment_kept(t, &tests);
    nir_variable_mode modes = nir_var_image;
-   nir_begin_invocation_interlock(b);
+   if (t->stage_options->raster_order_groups)
+      nir_begin_invocation_interlock(b);
    nir_scoped_memory_barrier(b, SCOPE_DEVICE, NIR_MEMORY_ACQUIRE, modes);
    nir_def *passed = fragment_tests_run(t, &tests, kept);
    nir_scoped_memory_barrier(b, SCOPE_DEVICE, NIR_MEMORY_RELEASE, modes);
-   nir_end_invocation_interlock(b);
+   if (t->stage_options->raster_order_groups)
+      nir_end_invocation_interlock(b);
    if (!fragment_tests_end(t, nir_iand(b, passed, kept)))
       return false;
    nir_progress(true, impl, nir_metadata_none);
@@ -9837,8 +9839,8 @@ translate(const void *bitcode, size_t size, const char *entry,
       nir_remove_dead_variables(t.b.shader, nir_var_function_temp, NULL);
    }
    if (stage && stage->stage == STELA_AIR_FRAGMENT && stage->self_tests) {
-      if (!stage->fragment_tests || !stage->raster_order_groups || !options->bind_depth_stencil) {
-         fail(&t, STELA_AIR_TARGET, "fragment tests a function runs itself need the device's fragment shader interlock");
+      if (!stage->fragment_tests || !options->bind_depth_stencil) {
+         fail(&t, STELA_AIR_TARGET, "fragment tests a function runs itself need depth-stencil attachment bindings");
          goto done;
       }
       t.tests_fragments = true;
